@@ -1,72 +1,69 @@
-// A tiny static server for game/ (Node 22, standard library only), so an entry can be played
-// locally without a build step: `node serve.ts` serves game/ on http://localhost:8080.
-// It sends the MIME types a browser game needs, refuses any path outside game/, and otherwise
-// does nothing clever: this is a development convenience, not a web server for the internet.
-import { createReadStream, statSync } from 'node:fs';
+import { createReadStream, realpathSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { extname, join, normalize, resolve, sep } from 'node:path';
+import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
-const args = process.argv.slice(2);
-const portIndex = args.indexOf('--port');
-const requested = portIndex === -1 ? 8080 : Number(args[portIndex + 1]);
-const port = Number.isInteger(requested) && requested > 0 && requested < 65536 ? requested : 8080;
+const root = realpathSync(fileURLToPath(new URL('./game/', import.meta.url)));
+const flag = process.argv.indexOf('--port', 2);
+const candidate = Number(process.argv[flag + 1]);
+const port = flag >= 2 && Number.isInteger(candidate) && candidate >= 1 && candidate <= 65535 ? candidate : 8080;
+const utf8 = '; charset=utf-8';
+const mime = new Map([
+  ['.html', 'text/html' + utf8], ['.js', 'text/javascript' + utf8],
+  ['.mjs', 'text/javascript' + utf8], ['.css', 'text/css' + utf8],
+  ['.json', 'application/json' + utf8], ['.txt', 'text/plain' + utf8],
+  ['.png', 'image/png'], ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'], ['.webp', 'image/webp'], ['.svg', 'image/svg+xml'],
+  ['.ico', 'image/x-icon'], ['.woff2', 'font/woff2'], ['.glb', 'model/gltf-binary'],
+  ['.gltf', 'model/gltf+json'], ['.bin', 'application/octet-stream'],
+  ['.wasm', 'application/wasm'], ['.wav', 'audio/wav'], ['.mp3', 'audio/mpeg'], ['.ogg', 'audio/ogg'],
+]);
 
-const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
-  '.glb': 'model/gltf-binary',
-  '.gltf': 'model/gltf+json',
-  '.bin': 'application/octet-stream',
-  '.wasm': 'application/wasm',
-  '.wav': 'audio/wav',
-  '.mp3': 'audio/mpeg',
-  '.ogg': 'audio/ogg',
-  '.txt': 'text/plain; charset=utf-8',
-};
+/** @param {string} path */
+function insideRoot(path) {
+  const route = relative(root, path);
+  return route !== '..' && !route.startsWith('..' + sep) && !isAbsolute(route);
+}
 
-createServer((request, response) => {
-  const url = new URL(request.url ?? '/', 'http://localhost');
-  let pathname: string;
+createServer((req, res) => {
+  let route;
   try {
-    pathname = decodeURIComponent(url.pathname);
+    const raw = (req.url ?? '/').split(/[?#]/, 1)[0];
+    route = decodeURIComponent(raw);
+    if (!route.startsWith('/') || route.includes('\0')) throw new Error('Invalid path');
   } catch {
-    response.writeHead(400).end('bad request');
+    res.writeHead(400).end('bad request');
     return;
   }
-  if (pathname.endsWith('/')) pathname += 'index.html';
-  const file = resolve(join(root, normalize(pathname)));
-  if (file !== root && !file.startsWith(root + sep)) {
-    response.writeHead(403).end('forbidden');
+  const path = resolve(root, '.' + route + (route.endsWith('/') ? 'index.html' : ''));
+  if (!insideRoot(path)) {
+    res.writeHead(403).end('forbidden');
     return;
   }
-  let size: number;
+
+  let file, size;
   try {
-    const stats = statSync(file);
-    if (!stats.isFile()) throw new Error('not a file');
-    size = stats.size;
+    file = realpathSync(path);
+    if (!insideRoot(file)) {
+      res.writeHead(403).end('forbidden');
+      return;
+    }
+    const stat = statSync(file);
+    if (!stat.isFile()) throw new Error('Expected a file');
+    size = stat.size;
   } catch {
-    response.writeHead(404).end('not found');
+    res.writeHead(404).end('not found');
     return;
   }
-  response.writeHead(200, {
-    'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
+
+  res.writeHead(200, {
+    'content-type': mime.get(extname(file).toLowerCase()) ?? 'application/octet-stream',
     'content-length': size,
     'cache-control': 'no-store',
   });
-  createReadStream(file).pipe(response);
-}).listen(port, '127.0.0.1', () => {
-  console.log(`game/ is on http://localhost:${port}`);
-});
+  if (req.method === 'HEAD') res.end();
+  else createReadStream(file).on('error', () => res.destroy()).pipe(res);
+}).on('error', (error) => {
+  console.error('Cannot serve game/ on 127.0.0.1:' + port + ' (' + (error.code ?? error.message) + ')');
+  process.exitCode = 1;
+}).listen(port, '127.0.0.1', () => console.log('game/ is on http://localhost:' + port));

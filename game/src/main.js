@@ -1,4 +1,3 @@
-// Browser startup, persistence, frame timing and accessible game controls.
 import { createRandom } from './random.js';
 import { createWorld } from './world.js';
 import { input } from './input.js';
@@ -7,43 +6,15 @@ import { stage } from './shots.js';
 import { createAudio } from './audio.js';
 import { load, save } from './save.js';
 
-const query = new URLSearchParams(window.location.search);
-const seed = Number(query.get('seed')) || 1;
-const shot = query.get('shot');
-const canvas = document.querySelector('#game');
-const status = document.querySelector('#status');
-const world = createWorld(createRandom(seed));
+const params = new URLSearchParams(location.search);
+const canvas = document.getElementById('game');
+const status = document.getElementById('status');
+const world = createWorld(createRandom(Number(params.get('seed')) || 1));
 const renderer = createRenderer(canvas, world);
-const controls = input(canvas);
-const audio = createAudio();
-const previous = { keys: {}, screen: world.s.screen, mission: world.s.mission, cash: world.s.player.cash, damage: 0, ammo: world.s.player.ammo };
-
-const stored = load();
-if (stored) {
-  world.s.player.cash = stored.cash || 1200;
-  world.s.mission = stored.mission || 0;
-  world.s.packages = stored.packages || 0;
-  world.s.best = stored.best || 0;
-  world.s.muted = !!stored.muted;
-  if (world.s.muted) audio.toggle();
-}
-
-function announce(message) {
-  status.textContent = message;
-}
-function pressed(code) {
-  const current = controls.down(code);
-  const fresh = current && !previous.keys[code];
-  previous.keys[code] = current;
-  return fresh;
-}
-function isDown(...codes) {
-  return codes.some((code) => controls.down(code));
-}
+const shot = params.get('shot');
 
 if (shot) {
   stage(shot, world);
-  renderer.draw();
   renderer.draw();
   requestAnimationFrame(() => {
     renderer.draw();
@@ -51,82 +22,120 @@ if (shot) {
     document.body.dataset.shotReady = 'true';
   });
 } else {
-  announce('Port Solano. Press Enter to continue or N for a new story.');
-  let priorFrame = performance.now();
-  let lastSave = 0;
+  play();
+}
 
-  function recoverScreen() {
-    const s = world.s;
-    if (!['busted', 'wasted', 'complete'].includes(s.screen)) return;
-    if (pressed('KeyR')) {
-      world.restartMission();
-      s.screen = 'play';
-      s.player.x = 1250;
-      s.player.y = 1270;
-    }
-    if (isDown('Enter', 'Space') || controls.mouse.down) {
-      if (s.screen === 'wasted') { s.player.cash = Math.max(0, s.player.cash - 250); save(s); }
-      s.screen = 'play'; s.paused = false; s.player.health = 100; s.player.armour = 35; s.wanted = 0;
-      s.player.x = 960; s.player.y = 1270; s.complete = false;
-      announce('Back in Port Solano.');
-    }
+function play() {
+  const { s } = world;
+  const controls = input(canvas);
+  const audio = createAudio();
+  const announce = (message) => { status.textContent = message; };
+  const record = load();
+  let restoreMission = false;
+  if (record) {
+    s.player.cash = record.cash ?? 1200;
+    s.mission = record.mission || 0;
+    s.packages = record.packages || 0;
+    s.best = record.best || 0;
+    if (record.muted) s.muted = audio.toggle();
+    restoreMission = s.mission > 0 && s.mission < 6;
   }
 
-  function menuKeys() {
-    const s = world.s;
-    if (pressed('KeyM')) { s.muted = audio.toggle(); save(s); }
-    if (s.screen === 'title' && pressed('KeyN')) {
-      audio.start(); world.newGame(); announce('New game. First Wheels. Find a car and deliver it to the garage.');
+  const actionKeys = ['KeyM', 'KeyN', 'KeyP', 'Escape', 'KeyQ', 'KeyR'];
+  let held = new Set();
+  let previous = snapshot();
+  let lastFrame = performance.now();
+  let lastSave = 0;
+  announce('Port Solano. Press Enter to continue or N for a new story.');
+
+  function snapshot() {
+    return { screen: s.screen, mission: s.mission, cash: s.player.cash, damage: s.damage, ammo: s.player.ammo };
+  }
+
+  function readMenus() {
+    const next = new Set(actionKeys.filter(controls.down));
+    const tapped = (key) => next.has(key) && !held.has(key);
+    const confirm = controls.down('Enter') || controls.down('Space') || controls.mouse.down;
+    const p = s.player;
+
+    if (['busted', 'wasted', 'complete'].includes(s.screen)) {
+      if (tapped('KeyR')) {
+        world.restartMission();
+        Object.assign(p, { x: 1250, y: 1270 });
+        s.screen = 'play';
+      } else if (confirm) {
+        if (s.screen === 'wasted') {
+          p.cash = Math.max(0, p.cash - 250);
+          save(s);
+        }
+        Object.assign(p, { x: 960, y: 1270, health: 100, armour: 35 });
+        Object.assign(s, { screen: 'play', paused: false, wanted: 0, complete: false });
+        announce('Back in Port Solano.');
+      }
     }
-    if (s.screen === 'title' && (isDown('Enter', 'Space') || controls.mouse.down)) {
-      audio.start(); s.screen = 'play';
-      announce('Port Solano. First Wheels. Find a car and deliver it to the garage.');
+
+    if (tapped('KeyM')) {
+      s.muted = audio.toggle();
+      save(s);
     }
-    if (pressed('KeyP') || pressed('Escape')) {
+    if (s.screen === 'title' && (tapped('KeyN') || confirm)) {
+      audio.start();
+      if (tapped('KeyN')) world.newGame();
+      else {
+        // Saves keep the mission number, so rebuild its opening state on resume.
+        if (restoreMission) world.restartMission();
+        s.screen = 'play';
+      }
+      restoreMission = false;
+      announce('Mission: ' + world.missionData()[0] + '. ' + world.missionData()[2]);
+    }
+    if (tapped('KeyP') || tapped('Escape')) {
       s.paused = !s.paused;
       announce(s.paused ? 'Paused.' : 'Resumed.');
     }
-    if (s.paused && pressed('KeyQ')) {
-      save(s); s.paused = false; s.screen = 'title'; announce('Saved. Back to title.');
+    if (s.paused && tapped('KeyQ')) {
+      save(s);
+      Object.assign(s, { paused: false, screen: 'title' });
+      announce('Saved. Back to title.');
     }
-    if (s.paused && pressed('KeyR')) {
-      world.restartMission(); s.paused = false; announce('Mission restarted.');
+    if (s.paused && tapped('KeyR')) {
+      world.restartMission();
+      s.paused = false;
+      announce('Mission restarted.');
     }
+    held = next;
   }
 
-  function reportChanges(now) {
-    const s = world.s;
-    if (s.complete && s.screen === 'play') s.screen = 'complete';
-    if (s.player.cash > previous.cash) audio.cue(920);
-    if (s.damage > previous.damage) audio.cue(145);
-    if (s.player.ammo < previous.ammo) audio.cue(240);
-    if (s.screen !== previous.screen) {
-      previous.screen = s.screen;
-      if (s.screen === 'wasted' || s.screen === 'busted') announce(`${s.screen.toUpperCase()}. Enter to continue, R to retry.`);
-      else if (s.paused) announce('Paused. Press P to resume.');
+  function report(now) {
+    const current = snapshot();
+    if (current.cash > previous.cash) audio.cue(920);
+    if (current.damage > previous.damage) audio.cue(145);
+    if (current.ammo < previous.ammo) audio.cue(240);
+    if (current.screen !== previous.screen && ['wasted', 'busted'].includes(current.screen)) {
+      announce(current.screen.toUpperCase() + '. Enter to continue, R to retry.');
     }
-    if (s.mission !== previous.mission) {
-      previous.mission = s.mission;
-      announce(s.mission < 6 ? `Mission update: ${world.missionData()[0]}` : 'Port Solano story complete. Free roam unlocked.');
+    if (current.mission !== previous.mission) {
+      announce(s.mission < 6 ? 'Mission update: ' + world.missionData()[0] : 'Port Solano story complete. Free roam unlocked.');
       audio.cue(880);
       save(s);
     }
-    previous.cash = s.player.cash;
-    previous.damage = s.damage;
-    previous.ammo = s.player.ammo;
-    if (now - lastSave > 4000) { save(s); lastSave = now; }
+    if (now - lastSave > 4000) {
+      save(s);
+      lastSave = now;
+    }
+    previous = current;
   }
 
   function frame(now) {
-    const dt = Math.min(0.04, (now - priorFrame) / 1000);
-    priorFrame = now;
-    recoverScreen();
-    menuKeys();
+    const dt = Math.max(0, Math.min(0.04, (now - lastFrame) / 1000));
+    lastFrame = now;
+    readMenus();
     world.update(dt, controls);
-    audio.update(world.s.player.car?.speed || 0, world.s.wanted);
-    reportChanges(now);
+    audio.update(s.player.car?.speed || 0, s.wanted);
+    report(now);
     renderer.draw();
     requestAnimationFrame(frame);
   }
+
   requestAnimationFrame(frame);
 }

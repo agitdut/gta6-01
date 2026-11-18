@@ -1,1 +1,26 @@
-<!doctype html><html><head><meta charset="utf-8"><title>PORT SOLANO</title><style>html,body{margin:0;background:#07131c;overflow:hidden;font-family:Arial,sans-serif}canvas{display:block;width:100vw;height:100vh}#status{position:absolute;left:-9999px}</style></head><body><canvas id="game"></canvas><div id="status" aria-live="polite"></div><script type="module" src="./src/main.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PORT SOLANO</title>
+  <style>
+    html, body {
+      margin: 0;
+      background: #07131c;
+      color: #f7eedb;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    canvas { display: block; width: 100vw; height: 100vh; }
+    noscript { position: absolute; top: 1rem; left: 1rem; }
+    #status { position: absolute; left: -9999px; }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <noscript>Enable JavaScript to play Port Solano.</noscript>
+  <div id="status" aria-live="polite"></div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

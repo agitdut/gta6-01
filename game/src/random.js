@@ -1,10 +1,13 @@
-// Mulberry32 deterministic random source for reproducible city layouts and traffic.
+const INCREMENT = 0x6d2b79f5;
+const UINT32_RANGE = 2 ** 32;
+
 export function createRandom(seed) {
-  let a = seed | 0;
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  let state = seed >>> 0;
+  return function next() {
+    // Keep the state bounded so a long session cannot lose integer precision.
+    state = (state + INCREMENT) >>> 0;
+    const first = Math.imul(state ^ (state >>> 15), state | 1);
+    const mixed = first ^ (first + Math.imul(first ^ (first >>> 7), first | 61));
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / UINT32_RANGE;
   };
 }
