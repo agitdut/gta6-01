@@ -1,4 +1,4 @@
-// Browser boot, game loop, saves, menu transitions and reproducible screenshot scenes.
+// Browser startup, persistence, frame timing and accessible game controls.
 import { createRandom } from './random.js';
 import { createWorld } from './world.js';
 import { input } from './input.js';
@@ -6,26 +6,41 @@ import { createRenderer } from './render.js';
 import { stage } from './shots.js';
 import { createAudio } from './audio.js';
 import { load, save } from './save.js';
-const seed = Number(new URLSearchParams(location.search).get('seed')) || 1,
-  shot = new URLSearchParams(location.search).get('shot');
-const canvas = document.querySelector('#game'),
-  status = document.querySelector('#status'),
-  world = createWorld(createRandom(seed)),
-  renderer = createRenderer(canvas, world),
-  keys = input(canvas),
-  audio = createAudio();
-const loaded = load();
-if (loaded) {
-  world.s.player.cash = loaded.cash || 1200;
-  world.s.mission = loaded.mission || 0;
-  world.s.packages = loaded.packages || 0;
-  world.s.best = loaded.best || 0;
-  world.s.muted = !!loaded.muted;
+
+const query = new URLSearchParams(window.location.search);
+const seed = Number(query.get('seed')) || 1;
+const shot = query.get('shot');
+const canvas = document.querySelector('#game');
+const status = document.querySelector('#status');
+const world = createWorld(createRandom(seed));
+const renderer = createRenderer(canvas, world);
+const controls = input(canvas);
+const audio = createAudio();
+const previous = { keys: {}, screen: world.s.screen, mission: world.s.mission, cash: world.s.player.cash, damage: 0, ammo: world.s.player.ammo };
+
+const stored = load();
+if (stored) {
+  world.s.player.cash = stored.cash || 1200;
+  world.s.mission = stored.mission || 0;
+  world.s.packages = stored.packages || 0;
+  world.s.best = stored.best || 0;
+  world.s.muted = !!stored.muted;
   if (world.s.muted) audio.toggle();
 }
-function announce(t) {
-  status.textContent = t;
+
+function announce(message) {
+  status.textContent = message;
 }
+function pressed(code) {
+  const current = controls.down(code);
+  const fresh = current && !previous.keys[code];
+  previous.keys[code] = current;
+  return fresh;
+}
+function isDown(...codes) {
+  return codes.some((code) => controls.down(code));
+}
+
 if (shot) {
   stage(shot, world);
   renderer.draw();
@@ -36,134 +51,80 @@ if (shot) {
     document.body.dataset.shotReady = 'true';
   });
 } else {
-  let prior = performance.now(),
-    lastTap = {},
-    lastStore = 0,
-    lastMission = world.s.mission,
-    lastScreen = world.s.screen,
-    lastCash = world.s.player.cash,
-    lastDamage = 0,
-    lastAmmo = world.s.player.ammo;
   announce('Port Solano. Press Enter to continue or N for a new story.');
-  function frame(now) {
-    let dt = Math.min(0.04, (now - prior) / 1000);
-    prior = now;
+  let priorFrame = performance.now();
+  let lastSave = 0;
+
+  function recoverScreen() {
     const s = world.s;
-    if (
-      (s.screen === 'busted' ||
-        s.screen === 'wasted' ||
-        s.screen === 'complete') &&
-      keys.down('KeyR') &&
-      !lastTap.retry
-    ) {
+    if (!['busted', 'wasted', 'complete'].includes(s.screen)) return;
+    if (pressed('KeyR')) {
       world.restartMission();
       s.screen = 'play';
       s.player.x = 1250;
       s.player.y = 1270;
-      lastTap.retry = 1;
     }
-    if (!keys.down('KeyR')) lastTap.retry = 0;
-    if (
-      (s.screen === 'busted' ||
-        s.screen === 'wasted' ||
-        s.screen === 'complete') &&
-      (keys.down('Enter') || keys.down('Space') || keys.mouse.down)
-    ) {
-      if (s.screen === 'wasted') {
-        s.player.cash = Math.max(0, s.player.cash - 250);
-        save(s);
-      }
-      s.screen = 'play';
-      s.paused = false;
-      s.player.health = 100;
-      s.player.armour = 35;
-      s.wanted = 0;
-      s.player.x = 960;
-      s.player.y = 1270;
-      s.complete = false;
+    if (isDown('Enter', 'Space') || controls.mouse.down) {
+      if (s.screen === 'wasted') { s.player.cash = Math.max(0, s.player.cash - 250); save(s); }
+      s.screen = 'play'; s.paused = false; s.player.health = 100; s.player.armour = 35; s.wanted = 0;
+      s.player.x = 960; s.player.y = 1270; s.complete = false;
       announce('Back in Port Solano.');
     }
-    if (keys.down('KeyM') && !lastTap.m) {
-      s.muted = audio.toggle();
-      lastTap.m = 1;
-      save(s);
+  }
+
+  function menuKeys() {
+    const s = world.s;
+    if (pressed('KeyM')) { s.muted = audio.toggle(); save(s); }
+    if (s.screen === 'title' && pressed('KeyN')) {
+      audio.start(); world.newGame(); announce('New game. First Wheels. Find a car and deliver it to the garage.');
     }
-    if (!keys.down('KeyM')) lastTap.m = 0;
-    if (s.screen === 'title' && keys.down('KeyN') && !lastTap.n) {
-      audio.start();
-      world.newGame();
-      lastTap.n = 1;
-      announce(
-        'New game. First Wheels. Find a car and deliver it to the garage.',
-      );
+    if (s.screen === 'title' && (isDown('Enter', 'Space') || controls.mouse.down)) {
+      audio.start(); s.screen = 'play';
+      announce('Port Solano. First Wheels. Find a car and deliver it to the garage.');
     }
-    if (!keys.down('KeyN')) lastTap.n = 0;
-    if (
-      s.screen === 'title' &&
-      (keys.down('Enter') || keys.down('Space') || keys.mouse.down)
-    ) {
-      audio.start();
-      s.screen = 'play';
-      announce(
-        'Port Solano. First Wheels. Find a car and deliver it to the garage.',
-      );
-    } else if (keys.down('KeyP') || keys.down('Escape')) {
-      if (!lastTap.p) {
-        s.paused = !s.paused;
-        lastTap.p = 1;
-        announce(s.paused ? 'Paused.' : 'Resumed.');
-      }
-    } else lastTap.p = 0;
-    if (s.paused && keys.down('KeyQ') && !lastTap.q) {
-      save(s);
-      s.paused = false;
-      s.screen = 'title';
-      lastTap.q = 1;
-      announce('Saved. Back to title.');
+    if (pressed('KeyP') || pressed('Escape')) {
+      s.paused = !s.paused;
+      announce(s.paused ? 'Paused.' : 'Resumed.');
     }
-    if (!keys.down('KeyQ')) lastTap.q = 0;
-    if (s.paused && keys.down('KeyR') && !lastTap.r) {
-      world.restartMission();
-      s.paused = false;
-      lastTap.r = 1;
-      announce('Mission restarted.');
+    if (s.paused && pressed('KeyQ')) {
+      save(s); s.paused = false; s.screen = 'title'; announce('Saved. Back to title.');
     }
-    if (!keys.down('KeyR')) lastTap.r = 0;
-    world.update(dt, keys);
-    audio.update(s.player.car?.speed || 0, s.wanted);
+    if (s.paused && pressed('KeyR')) {
+      world.restartMission(); s.paused = false; announce('Mission restarted.');
+    }
+  }
+
+  function reportChanges(now) {
+    const s = world.s;
     if (s.complete && s.screen === 'play') s.screen = 'complete';
-    if (s.player.cash > lastCash) {
-      audio.cue(920);
-      lastCash = s.player.cash;
-    }
-    if (s.damage > lastDamage) {
-      audio.cue(145);
-      lastDamage = s.damage;
-    }
-    if (s.player.ammo < lastAmmo) {
-      audio.cue(240);
-      lastAmmo = s.player.ammo;
-    }
-    if (s.screen !== lastScreen) {
-      lastScreen = s.screen;
-      if (s.screen === 'wasted' || s.screen === 'busted')
-        announce(s.screen.toUpperCase() + '. Enter to continue, R to retry.');
+    if (s.player.cash > previous.cash) audio.cue(920);
+    if (s.damage > previous.damage) audio.cue(145);
+    if (s.player.ammo < previous.ammo) audio.cue(240);
+    if (s.screen !== previous.screen) {
+      previous.screen = s.screen;
+      if (s.screen === 'wasted' || s.screen === 'busted') announce(`${s.screen.toUpperCase()}. Enter to continue, R to retry.`);
       else if (s.paused) announce('Paused. Press P to resume.');
     }
-    if (s.mission !== lastMission) {
-      lastMission = s.mission;
-      announce(
-        s.mission < 6
-          ? 'Mission update: ' + world.missionData()[0]
-          : 'Port Solano story complete. Free roam unlocked.',
-      );
+    if (s.mission !== previous.mission) {
+      previous.mission = s.mission;
+      announce(s.mission < 6 ? `Mission update: ${world.missionData()[0]}` : 'Port Solano story complete. Free roam unlocked.');
       audio.cue(880);
       save(s);
     }
-    if (now - lastStore > 4000) {
-      save(s);
-      lastStore = now;
-    }
+    previous.cash = s.player.cash;
+    previous.damage = s.damage;
+    previous.ammo = s.player.ammo;
+    if (now - lastSave > 4000) { save(s); lastSave = now; }
+  }
+
+  function frame(now) {
+    const dt = Math.min(0.04, (now - priorFrame) / 1000);
+    priorFrame = now;
+    recoverScreen();
+    menuKeys();
+    world.update(dt, controls);
+    audio.update(world.s.player.car?.speed || 0, world.s.wanted);
+    reportChanges(now);
     renderer.draw();
     requestAnimationFrame(frame);
   }
