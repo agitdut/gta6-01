@@ -1,87 +1,65 @@
-const MASTER_LEVEL = 0.065;
-const SCORE = [110, 146, 164, 196, 164, 146, 123, 146];
-const ENGINE = [
-  { wave: 'sawtooth', initial: 72, floor: 58, range: 165, slope: 0.42, ceiling: 0.09, divisor: 5200, smooth: 0.08 },
-  { wave: 'triangle', initial: 54, floor: 47, range: 90, slope: 0.19, ceiling: 0.035, divisor: 13500, smooth: 0.10 },
-];
-
-export function createAudio() {
-  let context, master, siren;
-  let engine = [];
-  let muted = false;
-  let phase = 0;
-  let note = 0;
-
-  function voice(wave, frequency, level) {
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.type = wave;
-    oscillator.frequency.value = frequency;
-    gain.gain.value = level;
-    oscillator.connect(gain);
-    gain.connect(master);
-    return { oscillator, gain };
-  }
-
-  function tone(wave, frequency, peak, decay, duration) {
-    const time = context.currentTime;
-    const { oscillator, gain } = voice(wave, frequency, peak);
-    gain.gain.setValueAtTime(peak, time);
-    gain.gain.exponentialRampToValueAtTime(0.001, time + decay);
-    oscillator.onended = () => {
-      oscillator.disconnect();
-      gain.disconnect();
-    };
-    oscillator.start(time);
-    oscillator.stop(time + duration);
-  }
-
-  function start() {
-    if (context || typeof window.AudioContext !== 'function') return;
-    context = new window.AudioContext();
-    master = context.createGain();
-    master.gain.value = muted ? 0 : MASTER_LEVEL;
-    master.connect(context.destination);
-
-    engine = ENGINE.map(({ wave, initial }) => voice(wave, initial, 0));
-    siren = voice('square', 640, 0);
-    for (const { oscillator } of [...engine, siren]) oscillator.start();
-
-    window.setInterval(() => {
-      if (muted) return;
-      tone('sine', SCORE[note++ % SCORE.length], 0.026, 0.34, 0.36);
-    }, 850);
-    if (context.state === 'suspended') {
-      // A browser may keep audio suspended under its autoplay settings.
-      context.resume().catch(() => {});
+export function createAudio(initiallyOn) {
+  let context;
+  let bus;
+  let motor;
+  let motorLevel;
+  let enabled = initiallyOn;
+  const unlock = () => {
+    if (!context) {
+      const Context = globalThis.AudioContext;
+      if (!Context) return;
+      context = new Context();
+      bus = context.createGain();
+      bus.gain.value = enabled ? 0.24 : 0;
+      bus.connect(context.destination);
+      motor = context.createOscillator();
+      motor.type = 'triangle';
+      motorLevel = context.createGain();
+      motorLevel.gain.value = 0;
+      motor.connect(motorLevel).connect(bus);
+      motor.start();
     }
-  }
+    if (context.state === 'suspended') context.resume().catch(() => {});
+  };
 
-  function update(speed, wanted) {
-    if (!context) return;
-    const time = context.currentTime;
-    const throttle = Math.abs(speed);
-    for (const [i, { oscillator, gain }] of engine.entries()) {
-      const spec = ENGINE[i];
-      gain.gain.setTargetAtTime(muted ? 0 : Math.min(spec.ceiling, throttle / spec.divisor), time, spec.smooth);
-      oscillator.frequency.setTargetAtTime(spec.floor + Math.min(spec.range, throttle * spec.slope), time, spec.smooth + 0.01);
-    }
-    phase += 0.035;
-    siren.gain.gain.setTargetAtTime(muted ? 0 : Math.min(0.035, wanted * 0.007), time, 0.12);
-    siren.oscillator.frequency.setTargetAtTime(560 + Math.sin(phase * 7) * 110, time, 0.08);
-  }
-
-  function cue(frequency = 660) {
-    if (context && !muted) tone('triangle', frequency, 0.065, 0.3, 0.31);
+  function note(pitch, end, duration, shape, volume, delay = 0) {
+    if (!context || !enabled) return;
+    const time = context.currentTime + delay;
+    const voice = context.createOscillator();
+    const envelope = context.createGain();
+    voice.type = shape;
+    voice.frequency.setValueAtTime(pitch, time);
+    voice.frequency.exponentialRampToValueAtTime(end, time + duration);
+    envelope.gain.setValueAtTime(volume, time);
+    envelope.gain.exponentialRampToValueAtTime(0.001, time + duration);
+    voice.connect(envelope).connect(bus);
+    voice.start(time);
+    voice.stop(time + duration);
   }
 
   return {
-    start, update, cue,
+    unlock,
     toggle() {
-      muted = !muted;
-      master?.gain.setTargetAtTime(muted ? 0 : MASTER_LEVEL, context.currentTime, 0.04);
-      return muted;
+      enabled = !enabled;
+      if (bus) bus.gain.setTargetAtTime(enabled ? 0.24 : 0, context.currentTime, 0.03);
+      return enabled;
     },
-    get muted() { return muted; },
+    engine(speed) {
+      if (!motor) return;
+      const time = context.currentTime;
+      motor.frequency.setTargetAtTime(36 + Math.abs(speed) * 0.26, time, 0.09);
+      motorLevel.gain.setTargetAtTime(speed ? 0.08 : 0, time, 0.12);
+    },
+    play(event) {
+      if (event === 'fire') note(160, 32, 0.11, 'sawtooth', 0.28);
+      if (event === 'impact') note(95, 31, 0.18, 'triangle', 0.38);
+      if (event === 'heat') {
+        note(420, 630, 0.27, 'sine', 0.22);
+        note(630, 410, 0.27, 'sine', 0.22, 0.27);
+      }
+      if (event === 'reward') {
+        [392, 494, 587, 784].forEach((pitch, i) => note(pitch, pitch, 0.28, 'triangle', 0.27, i * 0.09));
+      }
+    },
   };
 }

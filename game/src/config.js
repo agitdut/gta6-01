@@ -1,47 +1,20 @@
-// X lists north–south street centers, and Y lists east–west street centers.
-// Distances and speeds use world units. STEP is the reference frame duration.
-export const W = 2560;
-export const H = 1920;
-export const BEACH = 1740;
-export const ROAD = 112;
-export const STEP = 1 / 60;
-
-export const X = [160, 555, 960, 1365, 1770, 2050];
-export const Y = [160, 520, 895, 1270, 1660];
-export const districts = ['OLD TOWN', 'DOWNTOWN', 'MARINA', 'SUBURBS', 'PALM PARK', 'INDUSTRIAL'];
-
-export function district(x, y) {
-  if (y < 1050) return x < 750 ? 0 : x < 1750 ? 1 : 2;
-  return x < 750 ? 3 : x < 1500 ? 4 : 5;
-}
-
-const vehicle = (color, max, turn, len) => ({ color, max, turn, len });
-export const types = {
-  sedan: vehicle('#96dada', 305, 2.8, 45),
-  taxi: vehicle('#ffca58', 285, 2.8, 46),
-  sport: vehicle('#ff496e', 445, 3.15, 45),
-  van: vehicle('#b2a2e2', 250, 2.1, 53),
-  pickup: vehicle('#ef895b', 280, 2.4, 51),
-  police: vehicle('#accce8', 363, 3, 48),
-};
-
-export const point = (x, y) => ({ x, y });
-export const garage = point(1365, 895);
-export const station = point(960, 1270);
-export const contact = point(1280, 895);
-
-export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-export const distance = (from, to) => Math.hypot(to.x - from.x, to.y - from.y);
-export const angle = (from, to) => Math.atan2(to.y - from.y, to.x - from.x);
-export const wrapAngle = (radians) => Math.atan2(Math.sin(radians), Math.cos(radians));
-export const nearest = (values, target) => values.reduce((best, candidate) =>
-  Math.abs(best - target) < Math.abs(candidate - target) ? best : candidate,
-);
-
-export function light(time, x, y, horizontal) {
-  const phase = Math.floor(time / 7) + X.indexOf(x) + Y.indexOf(y);
-  return (phase % 2 === 0) === horizontal;
-}
-
-const dollars = new Intl.NumberFormat('en-US');
-export const money = (amount) => '$' + dollars.format(Math.floor(amount));
+export const BLOCK = 240;
+export const ROAD = 68;
+export const COLS = 10;
+export const ROWS = 8;
+export const WIDTH = COLS * BLOCK + ROAD;
+export const HEIGHT = ROWS * BLOCK + ROAD;
+export const DISTRICTS = [
+  ['SUNWARD HEIGHTS', 'CITRUS MARKET', 'SALTWIND PIER'],
+  ['MARIGOLD ROW', 'GLASS QUARTER', 'BLUE LANTERN'],
+];
+export const PAINT = ['#e7714c', '#eec16b', '#69b1b2', '#e5e2cf', '#38445a', '#9f6585'];
+export const STORY = [
+  { title: 'First Wheels', call: 'Dante hired you for one delivery. The ignition key is already in the coupe.', kind: 'marked', car: [3, 3], stop: [4, 3], reward: 220 },
+  { title: 'The Package', call: 'A dock clerk left the harbor ledger at Citrus Market. Bring it to Mara.', kind: 'parcel', pickup: [4, 2], stop: [6, 3], reward: 420 },
+  { title: 'Getaway Driver', call: 'Mara found a name in the ledger. Meet her at the pier and lose the harbor patrol.', kind: 'chase', pickup: [8, 3], stop: [7, 5], reward: 650 },
+  { title: 'Taxi Trouble', call: 'The witness needs an ordinary ride across town. A yellow cab is waiting.', kind: 'marked', car: [6, 5], stop: [4, 6], reward: 500 },
+  { title: 'Rooftop Deal', call: 'Pick up the duplicate ledger at the Glass Quarter roof stair. The buyer is near the market.', kind: 'parcel', pickup: [5, 5], stop: [3, 3], reward: 800 },
+  { title: 'The Big Score', call: 'The buyer sold you out. Take the evidence to the Blue Lantern freight gate.', kind: 'chase', pickup: [5, 3], stop: [9, 6], reward: 1500 },
+];
+export const FARE = { title: 'Meter Running', call: 'Pick up a cab and take the next fare to the market.', kind: 'marked', car: [5, 5], stop: [4, 3], reward: 150 };

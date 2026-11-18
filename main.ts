@@ -1,31 +1,34 @@
-// Run with node main.ts to stage the static game and screenshots before building
-// the dossier. MAKEFUN_OUTPUT_DIR selects a local folder in place of /output.
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildDossier } from './vendor/makefun-game.ts';
 
-// Match the scorer's limits so local builds catch the same oversized entries.
 const caps = {
-  text_max_bytes: 163840,
-  screenshots: { max: 4, max_bytes: 262144 },
+  text_max_bytes: 160 * 1024,
+  screenshots: { max: 4, max_bytes: 256 * 1024 },
   game_max_files: 993,
-  game_max_bytes: 50331648,
+  game_max_bytes: 48 * 1024 * 1024,
   game_path_max_bytes: 1000,
 };
 
 function assemble(destination = '/output') {
   mkdirSync(destination, { recursive: true });
-  for (const folder of ['game', 'screenshots']) {
-    const source = new URL(folder + '/', import.meta.url);
-    const target = join(destination, folder);
-    if (folder === 'screenshots' && !existsSync(source)) {
-      mkdirSync(target, { recursive: true });
-      continue;
-    }
-    cpSync(source, target, { recursive: true });
+  cpSync(new URL('./game/', import.meta.url), join(destination, 'game'), { recursive: true });
+  const source = new URL('./screenshots/', import.meta.url);
+  const screenshots = join(destination, 'screenshots');
+  const dossier = join(destination, 'dossier.json');
+  mkdirSync(screenshots, { recursive: true });
+  const names = existsSync(source) ? readdirSync(source) : [];
+  for (const name of readdirSync(screenshots)) {
+    if (!names.includes(name) && /^\d+-.*\.jpg$/.test(name)) rmSync(join(screenshots, name));
   }
-  const dossier = buildDossier(destination, caps);
-  writeFileSync(join(destination, 'dossier.json'), dossier);
+  if (!names.length) {
+    if (existsSync(dossier)) rmSync(dossier);
+    console.log('Game staged. Dossier pending the screenshot cover.');
+    return;
+  }
+  cpSync(source, screenshots, { recursive: true });
+  const report = buildDossier(destination, caps);
+  writeFileSync(dossier, report);
 }
 
 assemble(process.env.MAKEFUN_OUTPUT_DIR);

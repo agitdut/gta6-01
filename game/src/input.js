@@ -1,37 +1,40 @@
-const browserShortcuts = new Set([
-  'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-  'KeyE', 'KeyF', 'KeyP', 'Escape', 'KeyM',
-]);
-
-export function input(canvas) {
-  const k = new Set();
-  const mouse = { x: 0, y: 0, down: false, hasMoved: false };
-  const held = (code) => k.has(code);
-
-  function aim(event) {
-    Object.assign(mouse, { x: event.clientX, y: event.clientY, hasMoved: true });
-  }
-  function releasePointer() {
-    mouse.down = false;
-  }
-
-  addEventListener('keydown', (event) => {
-    k.add(event.code);
-    if (browserShortcuts.has(event.code)) event.preventDefault();
+export function createInput(canvas) {
+  const held = new Set();
+  const pressed = new Set();
+  const pointer = { x: 0, y: 0, active: false, down: false };
+  const blocked = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+  addEventListener('keydown', event => {
+    if (blocked.has(event.code)) event.preventDefault();
+    if (!event.repeat) pressed.add(event.code);
+    held.add(event.code);
   });
-  addEventListener('keyup', ({ code }) => k.delete(code));
+  addEventListener('keyup', event => held.delete(event.code));
   addEventListener('blur', () => {
-    k.clear();
-    releasePointer();
+    held.clear();
+    pressed.clear();
+    pointer.down = false;
   });
-
-  canvas.addEventListener('pointermove', aim);
-  canvas.addEventListener('pointerdown', (event) => {
-    aim(event);
-    mouse.down = true;
+  canvas.addEventListener('pointermove', event => {
+    pointer.x = event.clientX;
+    pointer.y = event.clientY;
+    pointer.active = true;
   });
-  addEventListener('pointerup', releasePointer);
-  addEventListener('pointercancel', releasePointer);
-
-  return { down: held, pressed: held, mouse, k };
+  canvas.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    pointer.x = event.clientX;
+    pointer.y = event.clientY;
+    pointer.active = true;
+    pointer.down = true;
+    canvas.setPointerCapture(event.pointerId);
+  });
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+    canvas.addEventListener(type, () => { pointer.down = false; });
+  }
+  const down = (...codes) => codes.some(code => held.has(code));
+  return {
+    down, pointer,
+    hit: (...codes) => codes.some(code => pressed.has(code)),
+    axis: (positive, negative) => Number(down(...positive)) - Number(down(...negative)),
+    end: () => pressed.clear(),
+  };
 }

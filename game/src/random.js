@@ -1,13 +1,17 @@
-const INCREMENT = 0x6d2b79f5;
-const UINT32_RANGE = 2 ** 32;
-
-export function createRandom(seed) {
-  let state = seed >>> 0;
-  return function next() {
-    // Keep the state bounded so a long session cannot lose integer precision.
-    state = (state + INCREMENT) >>> 0;
-    const first = Math.imul(state ^ (state >>> 15), state | 1);
-    const mixed = first ^ (first + Math.imul(first ^ (first >>> 7), first | 61));
-    return ((mixed ^ (mixed >>> 14)) >>> 0) / UINT32_RANGE;
+// A local stream keeps the city independent of frame timing.
+export function random(seed) {
+  let state = seed >>> 0 || 1;
+  return () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) / 4294967296;
   };
 }
+
+export const between = (next, lo, hi) => lo + (hi - lo) * next();
+export const pick = (next, values) => values[Math.floor(next() * values.length)];
+export const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+export const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+export const angleTo = (a, b) => Math.atan2(b.y - a.y, b.x - a.x);
+export const turn = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));

@@ -1,42 +1,35 @@
-import { STEP } from './config.js';
-
-const chaseLanes = [
-  [740, 496, Math.PI], [855, 496, Math.PI], [1285, 496, Math.PI],
-  [1525, 496, Math.PI], [1715, 540, 0], [1600, 540, 0],
-  [1385, 366, Math.PI / 2], [1346, 710, -Math.PI / 2],
-  [979, 685, Math.PI / 2], [941, 340, -Math.PI / 2],
-  [619, 540, 0], [1880, 496, Math.PI], [1400, 164, 0], [1140, 146, Math.PI],
-];
-
-function poseChase(s) {
-  Object.assign(s, { mission: 1, objective: 1, wanted: 2 });
-  const car = s.cars.find(({ type, traffic }) => type === 'sport' && !traffic);
-  Object.assign(car, { x: 1180, y: 540, a: 0, player: true, speed: 320 });
-  Object.assign(s.player, { x: car.x, y: car.y, angle: car.a, car, cash: 6850 });
-  chaseLanes.forEach(([x, y, a], index) => Object.assign(s.cars[index], { x, y, a }));
-  s.police = [
-    { x: 1072, y: 540, a: 0, vehicle: true },
-    { x: 953, y: 553, a: 0, vehicle: true },
-  ];
-}
+import { junction } from './city.js';
+import { vehicle } from './world.js';
 
 export function stage(name, world) {
-  const { s } = world;
-  s.paused = false;
-  s.screen = name === 'start' ? 'title' : 'play';
-
-  switch (name) {
-    case 'start':
-      Object.assign(s.player, { x: 1940, y: 1490 });
-      for (let tick = 0; tick < 90; tick++) world.update(STEP);
-      break;
-    case 'play':
-      poseChase(s);
-      break;
-    case 'end':
-      world.stageComplete();
-      break;
+  if (name === 'start') {
+    world.mode = 'start';
+    world.camera = { x: 2240, y: 598 };
+    return;
   }
 
-  return () => {};
+  world.index = name === 'play' ? 2 : 5;
+  world.prepareMission();
+  world.acquired = true;
+  world.mode = 'play';
+  world.time = 9.2;
+  const point = junction(8, 5);
+  const lead = vehicle(point.x + 35, point.y - 11, -0.12, '#f78758', { speed: 192 });
+  world.cars = world.cars.filter(car => Math.hypot(car.x - point.x, car.y - point.y) > 105);
+  world.cars.push(lead);
+  world.player.car = lead;
+  world.camera = { x: point.x + 95, y: point.y + 28 };
+  world.cash = name === 'play' ? 640 : 3235;
+
+  if (name === 'play') {
+    world.heat = 3;
+    world.player.health = 83;
+    for (const [dx, dy, angle] of [[-31, 10, -0.18], [-88, -12, 0.05], [3, 77, -1.58]]) {
+      world.cars.push(vehicle(point.x + dx, point.y + dy, angle, '#eeeadd', { police: true }));
+    }
+    world.effects.push({ kind: 'spark', x: point.x - 14, y: point.y + 2, ttl: 0.28 });
+  } else {
+    world.camera = { x: 2220, y: 1375 };
+    world.end(true);
+  }
 }
